@@ -2,6 +2,7 @@ using System.IO;
 using Arkship.Parts;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
 
 namespace Arkship.Vab
@@ -40,7 +41,8 @@ namespace Arkship.Vab
         void Start()
         {
             _partPickerPanel.OnPartPicked += OnPartPickerClicked;
-            
+            _partPickerPanel.OnLaunchButtonClicked += async () => await OnLaunchButtonClicked();
+
             _currentGizmo = _moveGizmo;
 
             _vehicleRoot = new GameObject("VehicleRoot").AddComponent<PartCollection>();
@@ -52,6 +54,17 @@ namespace Arkship.Vab
         {
             var newPart = _vehicleRoot.AddPart(part);
             SelectPart(newPart);
+        }
+
+        private async Awaitable OnLaunchButtonClicked()
+        {
+            string flightControlScenceName = "Prototype_FlightController";
+            Scene currentScene = SceneManager.GetActiveScene();
+            await SceneManager.LoadSceneAsync(flightControlScenceName, LoadSceneMode.Additive);
+
+            SceneManager.MoveGameObjectToScene(_vehicleRoot.gameObject, SceneManager.GetSceneByName(flightControlScenceName));
+
+            await SceneManager.UnloadSceneAsync(currentScene);
         }
 
         public void OnScreenClick(InputAction.CallbackContext context)
