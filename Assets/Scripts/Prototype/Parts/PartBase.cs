@@ -10,10 +10,12 @@ namespace Kosmos.Prototype.Parts
         
         private PartDefinition _createdFromDef;
         private IReadOnlyList<PartSocket> _sockets;
+        private IReadOnlyList<PartWeldPoint> _weldPoints;
         
         public virtual void Awake()
         {
             _sockets = GetComponentsInChildren<PartSocket>();
+            _weldPoints = GetComponentsInChildren<PartWeldPoint>();
         }
         
         public void SetCreatedFromDefinition(PartDefinition def)
@@ -39,6 +41,11 @@ namespace Kosmos.Prototype.Parts
         public IReadOnlyList<PartSocket> GetSockets()
         {
             return _sockets;
+        }
+        
+        public IReadOnlyList<PartWeldPoint> GetWeldPoints()
+        {
+            return _weldPoints;
         }
     }
 }

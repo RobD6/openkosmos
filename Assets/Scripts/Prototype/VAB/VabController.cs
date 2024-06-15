@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Kosmos.Prototype.Parts;
 using UnityEngine;
@@ -18,6 +19,7 @@ namespace Kosmos.Prototype.Vab
         [SerializeField] private GizmoBase _moveGizmo;
         
         [Header("Input")]
+        [SerializeField] private InputActionAsset _inputAsset;
         [SerializeField] private InputActionReference _mousePosition;
         [SerializeField] private InputActionReference _mouseDelta;
         [SerializeField] private InputActionReference _camFocus;
@@ -31,6 +33,7 @@ namespace Kosmos.Prototype.Vab
         private PartCollection _vehicleRoot;
         private PartBase _movingPart;
         private float _movingPartInitialDist;
+        private Quaternion _movingPartInitialRotation;
         private Camera _mainCam;
 
         private enum EControlState
@@ -45,6 +48,8 @@ namespace Kosmos.Prototype.Vab
 
         void Start()
         {
+            _inputAsset.Enable();
+            
             _partPickerPanel.OnPartPicked += OnPartPickerClicked;
             _partPickerPanel.OnLaunchButtonClicked += async () => await OnLaunchButtonClicked();
 
@@ -62,6 +67,11 @@ namespace Kosmos.Prototype.Vab
             _vehicleRoot = new GameObject("VehicleRoot").AddComponent<PartCollection>();
             _mainCam = _camController.GetComponent<Camera>();
             
+        }
+
+        private void OnDestroy()
+        {
+            _inputAsset.Disable();
         }
 
         private void OnCamFocusClick(InputAction.CallbackContext context)
@@ -94,6 +104,7 @@ namespace Kosmos.Prototype.Vab
             Vector3 mousePos = _mousePosition.action.ReadValue<Vector2>();
             mousePos.z = _camController.GetCamDistance();
             _movingPartInitialDist = mousePos.z;
+            _movingPartInitialRotation = _movingPart.transform.rotation;
             
             newPart.transform.position = _mainCam.ScreenToWorldPoint(mousePos);
         }
@@ -133,7 +144,8 @@ namespace Kosmos.Prototype.Vab
                     _controlState = EControlState.MovingPart;
                     _movingPart = part;
                     _movingPartInitialDist =
-                        Vector3.Distance(_mainCam.transform.position, _movingPart.transform.position); 
+                        Vector3.Distance(_mainCam.transform.position, _movingPart.transform.position);
+                    _movingPartInitialRotation = _movingPart.transform.rotation;
                     _vehicleRoot.DisconnectFromParents(_movingPart);
                 }
             }
@@ -206,17 +218,76 @@ namespace Kosmos.Prototype.Vab
             Vector3 newPos = _mainCam.ScreenToWorldPoint(new Vector3(mousePos.x, mousePos.y, _movingPartInitialDist));
             
             Vector3 mouseMoveWorld = newPos - _movingPart.transform.position;
-                
+
+            _movingPart.transform.rotation = _movingPartInitialRotation;
             _vehicleRoot.MovePart(_movingPart, mouseMoveWorld);
 
             //This is a bit clumsy. Rewrite it at some point
-            
-            if (_vehicleRoot.GetClosestPotentialConnection(_movingPart, out var partLink, _mainCam,
-                    _mainCam.pixelWidth * SNAP_DIST))
+            if (_movingPart.GetWeldPoints().Count > 0)
+            {
+                if (FindWeldPosition(mousePos, out var hitPart, out var hitPosition, out var normal, _movingPart))
+                {
+                    //Find the weld point with the normal most opposing the hit normal
+                    PartWeldPoint bestWeld = null;
+                    float bestDot = -1.0f;
+                    foreach (var weld in _movingPart.GetWeldPoints())
+                    {
+                        float dot = Vector3.Dot(weld.transform.forward, -normal);
+                        if (dot > bestDot)
+                        {
+                            bestDot = dot;
+                            bestWeld = weld;
+                        }
+                    }
+                    
+                    if (bestWeld != null)
+                    {
+                        //Orient the part so that the weld point is facing the hit normal
+                        Quaternion newWeldPointRot = Quaternion.LookRotation(-normal, Vector3.up);
+                        
+                        //Get the offset from the current orientation
+                        Quaternion offset = newWeldPointRot * Quaternion.Inverse(bestWeld.transform.rotation);
+                        
+                        //Apply to the part
+                        _movingPart.transform.rotation = offset * _movingPart.transform.rotation;
+                        
+                        Vector3 newPartPos = hitPosition + _movingPart.transform.position - bestWeld.transform.position;
+                        _vehicleRoot.MovePart(_movingPart, newPartPos - _movingPart.transform.position);
+                    }
+                }
+            }
+            else if (_vehicleRoot.GetClosestPotentialConnection(_movingPart, out var partLink, _mainCam,
+                         _mainCam.pixelWidth * SNAP_DIST))
             {
                 Vector3 offset = partLink._parentSocket.transform.position - partLink._childSocket.transform.position;
                 _vehicleRoot.MovePart(_movingPart, offset);
             }
+            //TODO - See if we can weld to an existing weld point
+        }
+
+        private bool FindWeldPosition(Vector2 mousePos, out PartBase hitPart, out Vector3 position, out Vector3 normal, PartBase ignorePart)
+        {
+            var ray = _mainCam.ScreenPointToRay(mousePos);
+            var ignorePartCol = ignorePart.GetComponent<Collider>();    //TODO - Move into the PartBase class and cache
+            ignorePartCol.enabled = false;
+            
+            if (Physics.Raycast(ray, out RaycastHit hit))
+            {
+                hitPart = hit.collider.GetComponentInParent<PartBase>();
+                if (hitPart != null)
+                {
+                    position = hit.point;
+                    normal = hit.normal;
+                    ignorePartCol.enabled = true;
+                    return true;
+                }
+            }
+
+            ignorePartCol.enabled = true;
+            hitPart = null;
+            position = default;
+            normal = default;
+            return false;
         }
         
         private string GetSaveFolder()
